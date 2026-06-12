@@ -1,0 +1,1 @@
+"""Test suite FastAPI Route"""

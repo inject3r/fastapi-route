@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastapi-route"
+version = "0.1.1"
+description = "File-based routing for FastAPI with automatic route discovery"
+authors = [{name = "Abolfazl Hosseini", email = "tryuzr@gmail.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "watchdog>=3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/inject3r/fastapi-route"
+Repository = "https://github.com/inject3r/fastapi-route.git"
+Documentation = "https://inject3r.github.io/fastapi-route"
+Issues = "https://github.com/inject3r/fastapi-route/issues"
+Changelog = "https://github.com/inject3r/fastapi-route/releases"
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "isort>=5.12.0",
+    "ruff>=0.0.260"
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0"
+]
+
+[project.scripts]
+fastapi-route = "fastapi_route.cli.commands:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fastapi_route*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--disable-warnings",
+    "--cov=fastapi_route",
+    "--cov-report=term-missing",
+    "--cov-report=html:tests/coverage_html"
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["fastapi_route"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
