@@ -90,13 +90,13 @@ class DocsCollector:
         Get FastAPI Route package version.
         
         Returns:
-            Version string (e.g., "0.1.1") or "0.1.1" if version cannot be read
+            Version string (e.g., "0.1.2") or "0.1.2" if version cannot be read
         """
         try:
             from ..version import __version__
             return __version__
         except ImportError:
-            return "0.1.1"
+            return "0.1.2"
     
     def _collect_route_doc(self, route: RouteInfo) -> Dict[str, Any]:
         """

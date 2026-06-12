@@ -187,7 +187,7 @@ class Config:
     openapi_prefix: str = ""
     title: Optional[str] = None
     description: Optional[str] = None
-    version: str = "0.1.1"
+    version: str = "0.1.2"
     terms_of_service: Optional[str] = None
     contact: Optional[Dict[str, str]] = None
     license_info: Optional[Dict[str, str]] = None

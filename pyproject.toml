@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-route"
-version = "0.1.1"
+version = "0.1.2"
 description = "File-based routing for FastAPI with automatic route discovery"
 authors = [{name = "Abolfazl Hosseini", email = "tryuzr@gmail.com"}]
 license = {text = "MIT"}

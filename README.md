@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fastapi-route/fastapi-route/main/docs/logo.png" alt="FastAPI Route Logo" width="300">
+  <img src="https://inject3r.github.io/fastapi-route/logo.jpg" alt="FastAPI Route Logo" width="300">
 </p>
 
 # FastAPI Route
