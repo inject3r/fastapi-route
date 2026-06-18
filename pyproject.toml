@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-route"
-version = "0.1.2"
+version = "0.2.0"
 description = "File-based routing for FastAPI with automatic route discovery"
 authors = [{name = "Abolfazl Hosseini", email = "tryuzr@gmail.com"}]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "fastapi>=0.100.0",
-    "uvicorn>=0.23.0",
-    "pydantic>=2.0.0",
-    "watchdog>=3.0.0",
+    "fastapi==0.104.1",
+    "uvicorn==0.24.0",
+    "pydantic==2.5.0",
+    "watchdog==3.0.0",
 ]
 
 [project.urls]
@@ -27,20 +27,20 @@ Changelog = "https://github.com/inject3r/fastapi-route/releases"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.21.0",
-    "httpx>=0.24.0",
-    "black>=23.0.0",
-    "mypy>=1.0.0",
-    "isort>=5.12.0",
-    "ruff>=0.0.260"
+    "pytest==7.4.3",
+    "pytest-cov==4.1.0",
+    "pytest-asyncio==0.21.1",
+    "httpx==0.25.1",
+    "black==23.12.0",
+    "mypy==1.7.1",
+    "isort==5.13.2",
+    "ruff==0.1.8"
 ]
 test = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.21.0",
-    "httpx>=0.24.0"
+    "pytest==7.4.3",
+    "pytest-cov==4.1.0",
+    "pytest-asyncio==0.21.1",
+    "httpx==0.25.1"
 ]
 
 [project.scripts]

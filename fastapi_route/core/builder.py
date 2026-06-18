@@ -12,7 +12,7 @@ The builder handles both production and development modes, with support for
 hot reloading of custom handlers in development.
 """
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Dict
 import inspect
 import json
 from pathlib import Path
@@ -27,7 +27,7 @@ from ..middleware.manager import MiddlewareManager
 from ..middleware.custom import CustomMiddlewareLoader
 from ..static import StaticFileMiddleware
 from ..utils.logger import logger
-from ..request import Request
+from ..request import Request, PayloadTooLargeError
 from ..response import Response, HTMLResponse, JSONResponse
 from ..exceptions import HTTPException
 from ..custom import CustomHandlerLoader
@@ -36,23 +36,33 @@ from ..custom.context import CustomHandlerContext
 
 class AppBuilder:
     """
-    Builds the complete FastAPI application from registered routes and configuration.
+    Builds complete FastAPI application with proper async handler detection.
     
-    This class handles the entire application assembly process:
-    1. Loading custom handlers (docs, 404, middleware)
-    2. Creating the FastAPI instance with docs disabled
-    3. Adding static file serving for /public directory
-    4. Setting up middleware (CORS, custom)
-    5. Registering all discovered routes
-    6. Adding exception handlers for HTTP errors
-    7. Adding custom documentation endpoint
-    8. Adding custom 404 handler
-    9. Setting up startup/shutdown lifecycle events
+    Orchestrates entire application assembly:
+    1. Load custom handlers (docs, 404, middleware)
+    2. Create FastAPI instance with docs disabled
+    3. Add static file serving for /public
+    4. Setup middleware (CORS, custom)
+    5. Register all routes with size limit validation
+    6. Add exception handlers
+    7. Setup startup/shutdown lifecycle events
+    
+    Features:
+    - Proper async/sync handler detection via inspect.iscoroutinefunction()
+    - Type-safe parameter injection
+    - Request body size limit enforcement (DoS prevention)
+    - Comprehensive error handling and logging
     """
     
-    def __init__(self, config: Config, registry: RouteRegistry, enable_docs: bool = True, custom_docs_template: Optional[str] = None):
+    def __init__(
+        self,
+        config: Config,
+        registry: RouteRegistry,
+        enable_docs: bool = True,
+        custom_docs_template: Optional[str] = None
+    ) -> None:
         """
-        Initialize the app builder with configuration and route registry.
+        Initialize the app builder.
         
         Args:
             config: Application configuration object
@@ -60,18 +70,18 @@ class AppBuilder:
             enable_docs: Whether to enable documentation endpoint
             custom_docs_template: Optional custom HTML template for docs
         """
-        self.config = config
-        self.registry = registry
-        self.middleware_manager = MiddlewareManager(config)
-        self.enable_docs = enable_docs
-        self.custom_docs_template = custom_docs_template
-        self.custom_loader = CustomHandlerLoader(Path.cwd())
-        self.custom_context = CustomHandlerContext(registry)
-        self.custom_not_found_handler = None
-        self.custom_docs_handler = None
-        self.custom_docs_error = None
-        self.custom_middleware = None
-        self.custom_middleware_error = None
+        self.config: Config = config
+        self.registry: RouteRegistry = registry
+        self.middleware_manager: MiddlewareManager = MiddlewareManager(config)
+        self.enable_docs: bool = enable_docs
+        self.custom_docs_template: Optional[str] = custom_docs_template
+        self.custom_loader: CustomHandlerLoader = CustomHandlerLoader(Path.cwd())
+        self.custom_context: CustomHandlerContext = CustomHandlerContext(registry)
+        self.custom_not_found_handler: Optional[Callable] = None
+        self.custom_docs_handler: Optional[Callable] = None
+        self.custom_docs_error: Optional[str] = None
+        self.custom_middleware: Optional[Callable] = None
+        self.custom_middleware_error: Optional[str] = None
     
     def build(self) -> FastAPI:
         """
@@ -283,13 +293,19 @@ class AppBuilder:
         """
         Add a single route to the FastAPI application.
         
-        This method converts our custom route definition into a FastAPI endpoint,
-        handling parameter extraction and response conversion.
+        Converts custom route definition into a FastAPI endpoint:
+        - Extracts path and query parameters with type conversion
+        - Creates custom Request wrapper with size limit enforcement
+        - Detects async/sync handlers and calls appropriately
+        - Converts results to FastAPI responses
+        - Handles errors including payload size violations
         """
+        max_body_size = getattr(self.config, 'max_request_body_size', 10 * 1024 * 1024)
+        
         async def endpoint(fastapi_request: FastAPIRequest) -> Any:
             try:
-                # Create our custom request wrapper
-                custom_request = Request(fastapi_request.scope)
+                # Create custom request wrapper with size limit
+                custom_request = Request(fastapi_request.scope, max_body_size=max_body_size)
                 
                 # Inject FastAPI's async methods
                 async def get_body():
@@ -345,7 +361,7 @@ class AppBuilder:
                                 pass
                         call_args[param_name] = value
                 
-                # Execute the route handler
+                # Execute the route handler with proper async/sync detection
                 if inspect.iscoroutinefunction(route.handler):
                     result = await route.handler(**call_args)
                 else:
@@ -379,21 +395,36 @@ class AppBuilder:
                 else:
                     return {"result": result}
                     
+            except PayloadTooLargeError as e:
+                # Request body exceeds configured size limit
+                logger.warning(f"Request payload too large for {route.method} {route.path}: {e}")
+                return FastAPIJSONResponse(
+                    status_code=413,
+                    content={"error": "Payload too large", "max_size": max_body_size}
+                )
             except HTTPException as e:
-                # FastAPI Route's HTTP exceptions
+                # FastAPI Route's custom HTTP exceptions
+                logger.debug(f"HTTP exception in {route.method} {route.path}: {e.status_code} {e.detail}")
                 return FastAPIJSONResponse(
                     status_code=e.status_code,
                     content={"detail": e.detail},
                     headers=e.headers
                 )
+            except ValueError as e:
+                # Invalid JSON or value conversion errors
+                logger.error(f"Value error in {route.method} {route.path}: {e}")
+                return FastAPIJSONResponse(
+                    content={"error": str(e)},
+                    status_code=400
+                )
             except Exception as e:
                 # Unexpected errors
                 logger.error(f"Error in {route.method} {route.path}: {e}")
                 import traceback
-                traceback.print_exc()
+                logger.debug(traceback.format_exc())
                 return FastAPIJSONResponse(
                     status_code=500,
-                    content={"detail": str(e)}
+                    content={"detail": "Internal server error"}
                 )
         
         # Register with FastAPI based on HTTP method

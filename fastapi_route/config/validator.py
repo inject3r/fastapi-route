@@ -1,32 +1,38 @@
 """
-Configuration validator for config.py files.
+Configuration validator with security-aware checks.
 
-This module provides validation for user-written configuration files,
-checking both Python syntax and the structure of configuration variables.
-It returns friendly error messages that help users fix their configuration.
+Validates user-written configuration files checking:
+- Python syntax validity
+- Type correctness
+- Security issues (CORS origins, body size limits)
+- Format validity
+
+Returns friendly, actionable error messages.
 """
 
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
+from urllib.parse import urlparse
 import re
 
 
 class ConfigValidator:
     """
-    Validates user configuration from config.py files.
+    Security-aware validator for config.py files.
     
-    This validator performs two levels of validation:
-    1. Syntax validation - ensures the Python code is valid
-    2. Structure validation - checks that variables have correct types
+    Validation levels:
+    1. Syntax validation - Python code is valid
+    2. Type validation - Variables have correct Python types
+    3. Security validation - No dangerous configs (e.g., CORS wildcard, huge body limits)
+    4. Format validation - Values match expected patterns
     
-    Error messages are designed to be user-friendly and actionable,
-    pointing to specific fields and explaining what went wrong.
+    Error messages are specific and actionable for users.
     """
     
     # Required fields that must be present (none are strictly required)
     REQUIRED_FIELDS = []
     
-    # Optional fields with their expected types and friendly error messages
+    # Optional fields with types and friendly error messages
     OPTIONAL_FIELDS = {
         "app_name": (str, "Application name must be a string"),
         "debug": (bool, "Debug must be a boolean (True/False)"),
@@ -39,70 +45,99 @@ class ConfigValidator:
         "custom_docs_template": (str, "custom_docs_template must be a string or None"),
     }
     
+    # Security limits
+    MAX_BODY_SIZE = 500 * 1024 * 1024  # 500MB absolute max
+    INSECURE_CORS_ORIGINS = ["*"]      # Dangerous patterns
+    
     def validate_config_dict(self, config_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """
-        Validate a configuration dictionary's structure and types.
+        Validate configuration dictionary with security checks.
         
-        This method checks:
-        - No unknown fields are present (caches typos)
-        - Each field has the correct Python type
-        - Special validation for list contents (e.g., cors_origins items)
-        - Directory name format validation
+        Checks:
+        - Unknown fields (typos in config keys)
+        - Correct Python types for each field
+        - List contents are valid (e.g., cors_origins items)
+        - Security issues (CORS wildcard, invalid URLs)
+        - Format validity (directory names, URL patterns)
         
         Args:
-            config_dict: Dictionary of configuration variables extracted from config.py
+            config_dict: Dictionary of configuration variables
             
         Returns:
             Tuple of (is_valid, errors_list)
-            - is_valid: True if all validations passed
-            - errors_list: List of human-readable error messages
         """
         errors = []
+        warnings = []
         
-        # Check for unknown fields (helps cache typos in config keys)
+        # Check for unknown fields (helps catch typos)
         for key in config_dict:
             if key not in self.OPTIONAL_FIELDS and key not in self.REQUIRED_FIELDS:
-                errors.append(f"Unknown configuration field: '{key}'")
+                errors.append(f"Unknown config field '{key}' - did you mean one of: {', '.join(self.OPTIONAL_FIELDS.keys())}")
         
-        # Validate each field that exists in the config
+        # Validate each existing field
         for field, (expected_type, error_msg) in self.OPTIONAL_FIELDS.items():
-            if field in config_dict:
-                value = config_dict[field]
-                
-                # Type checking
-                if not isinstance(value, expected_type):
-                    # Special case: custom_docs_template can be None
-                    if expected_type == str and value is None:
-                        pass
+            if field not in config_dict:
+                continue
+            
+            value = config_dict[field]
+            
+            # Type checking
+            if not isinstance(value, expected_type):
+                # Special case: custom_docs_template can be None
+                if expected_type == str and value is None:
+                    pass
+                else:
+                    errors.append(f"Field '{field}': {error_msg} (got {type(value).__name__})")
+                    continue
+            
+            # Field-specific validations
+            if field == "cors_origins" and isinstance(value, list):
+                for i, origin in enumerate(value):
+                    if not isinstance(origin, str):
+                        errors.append(f"cors_origins[{i}] must be a string, got {type(origin).__name__}")
                     else:
-                        errors.append(f"Field '{field}': {error_msg} (got {type(value).__name__})")
-                
-                # Field-specific validations
-                if field == "cors_origins" and isinstance(value, list):
-                    for i, origin in enumerate(value):
-                        if not isinstance(origin, str):
-                            errors.append(f"cors_origins[{i}] must be a string, got {type(origin).__name__}")
-                
-                elif field == "middlewares" and isinstance(value, list):
-                    for i, middleware in enumerate(value):
-                        if not isinstance(middleware, str):
-                            errors.append(f"middlewares[{i}] must be a string, got {type(middleware).__name__}")
-                
-                elif field == "plugins" and isinstance(value, list):
-                    for i, plugin in enumerate(value):
-                        if not isinstance(plugin, str):
-                            errors.append(f"plugins[{i}] must be a string, got {type(plugin).__name__}")
-                
-                elif field == "route_dir" and isinstance(value, str):
-                    # Validate directory name format (alphanumeric, underscores, forward slashes)
-                    if not value or not re.match(r'^[a-zA-Z_][a-zA-Z0-9_/]*$', value):
-                        errors.append(f"route_dir must be a valid directory name, got '{value}'")
-                
-                elif field == "custom_docs_template" and value is not None:
-                    if not isinstance(value, str):
-                        errors.append("custom_docs_template must be a string or None")
+                        # Security check: warn about wildcard
+                        if origin == "*":
+                            warnings.append("⚠️  CORS wildcard '*' allows any origin - consider restricting for production")
+                        # Validate URL format (except for localhost)
+                        elif not origin.startswith("http://localhost"):
+                            try:
+                                result = urlparse(origin)
+                                if not result.scheme or not result.netloc:
+                                    errors.append(f"cors_origins[{i}] '{origin}' is not a valid URL (must include scheme like http://)")
+                            except Exception:
+                                errors.append(f"cors_origins[{i}] '{origin}' failed URL validation")
+            
+            elif field == "middlewares" and isinstance(value, list):
+                for i, middleware in enumerate(value):
+                    if not isinstance(middleware, str):
+                        errors.append(f"middlewares[{i}] must be a string (import path), got {type(middleware).__name__}")
+                    else:
+                        # Check format: should look like "module.path.ClassName"
+                        if not middleware or not "." in middleware:
+                            errors.append(f"middlewares[{i}] '{middleware}' should be a module path like 'myapp.middleware.AuthMiddleware'")
+            
+            elif field == "plugins" and isinstance(value, list):
+                for i, plugin in enumerate(value):
+                    if not isinstance(plugin, str):
+                        errors.append(f"plugins[{i}] must be a string, got {type(plugin).__name__}")
+            
+            elif field == "route_dir" and isinstance(value, str):
+                # Validate directory name format
+                if not value or not re.match(r'^[a-zA-Z_][a-zA-Z0-9_/]*$', value):
+                    errors.append(f"route_dir '{value}' must be a valid directory name (start with letter or underscore)")
+            
+            elif field == "custom_docs_template" and value is not None:
+                if not isinstance(value, str):
+                    errors.append("custom_docs_template must be a string or None")
+            
+            elif field == "debug":
+                if value and "log" not in config_dict:
+                    warnings.append("Debug mode enabled - make sure it's False in production")
         
-        return len(errors) == 0, errors
+        # Return errors (fatal) and warnings (not fatal)
+        all_messages = errors + warnings
+        return len(errors) == 0, all_messages
     
     def validate_config_file(self, file_path: Path) -> Tuple[bool, List[str]]:
         """

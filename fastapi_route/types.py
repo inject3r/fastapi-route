@@ -80,10 +80,10 @@ class LoggingConfig:
 @dataclass
 class ServerConfig:
     """
-    Uvicorn server configuration settings.
+    Uvicorn server configuration with security limits.
     
     These settings control how the ASGI server behaves, including
-    networking, concurrency, and WebSocket parameters.
+    networking, concurrency, request limits, and WebSocket parameters.
     
     Most settings are passed directly to uvicorn.run().
     """
@@ -96,6 +96,7 @@ class ServerConfig:
     limit_max_requests: Optional[int] = None
     backlog: int = 2048
     h11_max_incomplete_event_size: Optional[int] = None
+    max_request_body_size: int = 10 * 1024 * 1024  # 10MB default limit for request bodies
     factory: bool = False
     uds: Optional[str] = None
     fd: Optional[int] = None

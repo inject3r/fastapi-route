@@ -1,22 +1,23 @@
 """
-Custom Request object that mimics FastAPI's Request interface.
+Custom Request object with security limits and FastAPI compatibility.
 
-This class provides a unified request interface for route handlers,
-abstracting away the underlying ASGI/Starlette/FastAPI details.
-It supports the same properties and methods as FastAPI's Request:
+Provides a unified request interface for route handlers, abstracting away
+the underlying ASGI/Starlette/FastAPI details. Supports same properties
+and methods as FastAPI's Request with built-in size limits:
 
 - method: HTTP method (GET, POST, etc.)
 - url: Full request URL
 - path: URL path
 - query_params: Dictionary of query parameters
 - headers: Dictionary of request headers
-- body(): Raw request body as bytes
-- json(): Parsed JSON body
-- form(): Parsed form data
+- body(): Raw request body as bytes (with size limit)
+- json(): Parsed JSON body (with size limit)
+- form(): Parsed form data (with size limit)
 
-The custom request object is passed to route handlers instead of the
-FastAPI request, allowing the framework to remain decoupled from FastAPI
-internals and making it easier to swap the underlying server if needed.
+Security Features:
+- Configurable max request body size
+- Prevents DoS attacks via large payloads
+- Graceful error handling for oversized requests
 """
 
 from typing import Any, Dict, Optional, Union
@@ -25,16 +26,27 @@ import json
 from urllib.parse import unquote
 
 
+# Default 10MB limit to prevent DoS attacks
+DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024
+
+
+class PayloadTooLargeError(Exception):
+    """Raised when request body exceeds configured size limit."""
+    pass
+
+
 class Request:
     """
-    Custom Request class that provides a FastAPI-compatible interface.
+    Custom Request class with security limits and FastAPI compatibility.
     
-    This request object is created for each incoming HTTP request and
-    passed to route handlers. It provides convenient methods for accessing
-    request data without exposing the underlying ASGI implementation.
+    This request object is created for each HTTP request and passed to
+    route handlers. It provides convenient methods for accessing request
+    data without exposing ASGI implementation details.
     
-    The request object supports both sync and async handlers, with body
-    and JSON parsing available as async methods to avoid blocking.
+    Security:
+    - Enforces max_body_size limit (default 10MB)
+    - Raises PayloadTooLargeError when exceeded
+    - Prevents memory exhaustion from large uploads
     
     Example:
         def GET(request: Request):
@@ -42,18 +54,23 @@ class Request:
             return {"message": f"Hello {name}"}
         
         async def POST(request: Request):
-            data = await request.json()
-            return {"received": data}
+            try:
+                data = await request.json()
+                return {"received": data}
+            except PayloadTooLargeError:
+                return {"error": "Request body too large"}, 413
     """
     
-    def __init__(self, scope: Dict[str, Any]):
+    def __init__(self, scope: Dict[str, Any], max_body_size: int = DEFAULT_MAX_BODY_SIZE):
         """
         Initialize the request from an ASGI scope dictionary.
         
         Args:
             scope: ASGI scope containing request metadata
+            max_body_size: Maximum allowed request body size in bytes (default 10MB)
         """
         self.scope = scope
+        self.max_body_size = max_body_size
         self._fastapi_request = None  # Reference to original FastAPI request
         self._body = None              # Cached raw body bytes
         self._json_body = None         # Cached parsed JSON
@@ -123,35 +140,45 @@ class Request:
     
     async def body(self) -> bytes:
         """
-        Get the raw request body as bytes.
+        Get the raw request body as bytes with size limit enforcement.
         
-        This is an async method because reading the body may involve
-        awaiting chunks from the network.
+        Enforces max_body_size to prevent DoS attacks via large payloads.
         
         Returns:
             Raw request body bytes
+            
+        Raises:
+            PayloadTooLargeError: If body exceeds max_body_size
         """
         if self._body is None:
             if self._fastapi_request:
                 self._body = await self._fastapi_request.body()
             else:
                 self._body = b""
+            
+            # Check size limit
+            if len(self._body) > self.max_body_size:
+                raise PayloadTooLargeError(
+                    f"Request body ({len(self._body)} bytes) exceeds limit ({self.max_body_size} bytes)"
+                )
+        
         return self._body
     
     async def json(self) -> Any:
         """
-        Parse the request body as JSON.
+        Parse the request body as JSON with size limit enforcement.
         
-        This is an async method that reads the body and parses it.
+        Enforces max_body_size limit before parsing JSON.
         
         Returns:
             Parsed JSON data (dict, list, str, int, etc.)
         
         Raises:
-            ValueError: If the body contains invalid JSON
+            PayloadTooLargeError: If body exceeds max_body_size
+            ValueError: If body contains invalid JSON
         """
         if self._json_body is None:
-            body = await self.body()
+            body = await self.body()  # Size check happens here
             if body:
                 try:
                     self._json_body = json.loads(body.decode())

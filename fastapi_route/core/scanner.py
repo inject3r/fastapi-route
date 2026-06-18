@@ -1,12 +1,14 @@
 """
-File system scanner for route discovery.
+File system scanner with detailed error reporting.
 
-This module scans the routes directory recursively, discovers route files,
-and extracts HTTP method handlers. It supports:
-- Dynamic routes using [param] syntax
-- Catch-all routes using [...slug] syntax
-- Route groups using (group) syntax (ignored in URL)
-- Automatic route path generation from folder structure
+Scans routes directory recursively, discovers route files, and extracts HTTP
+method handlers. Supports dynamic routes, catch-all routes, and route groups.
+
+Error Handling:
+- Static analysis (syntax checking) before import
+- Detailed error messages with file/line context
+- Graceful recovery from individual route failures
+- Aggregated error reporting
 """
 
 import importlib.util
@@ -28,14 +30,20 @@ from .validator import RouteValidator
 
 class RouteScanner:
     """
-    Scans filesystem and discovers route modules.
+    Scans filesystem and discovers route modules with detailed error reporting.
     
     The scanner walks through the routes directory, identifies route files,
-    and extracts HTTP method handlers (GET, POST, PUT, etc.). It handles:
-    - Static routes: routes/about/route.py -> /about
-    - Dynamic routes: routes/users/[user_id]/route.py -> /users/{user_id}
-    - Catch-all routes: routes/docs/[...slug]/route.py -> /docs/{slug}
-    - Route groups: routes/(auth)/profile/route.py -> /profile
+    and extracts HTTP method handlers (GET, POST, PUT, etc.). Supports:
+    - Static routes: routes/about/route.py → /about
+    - Dynamic routes: routes/users/[user_id]/route.py → /users/{user_id}
+    - Catch-all routes: routes/docs/[...slug]/route.py → /docs/{slug}
+    - Route groups: routes/(auth)/profile/route.py → /profile
+    
+    Error Reporting:
+    - Syntax errors with line numbers and context
+    - Import errors with detailed tracebacks
+    - Validation errors with specific field information
+    - All errors are aggregated and reported before failing
     """
     
     def __init__(self, routes_dir: str = "routes"):
@@ -90,17 +98,23 @@ class RouteScanner:
         
         if validation_errors:
             self.validator.print_errors()
-            logger.error(f"Route validation failed with {len(validation_errors)} errors")
+            logger.error(f"Route validation found {len(validation_errors)} issues - build aborted")
             self._has_critical_errors = True
-            # Don't return routes with validation errors - prevent broken builds
+            # Prevent broken builds - don't return any routes if validation fails
             return []
         
-        logger.info(f"Discovered {len(routes)} valid routes, {len(self._failed_routes)} failed")
-        
-        # Abort if any route files failed to load
+        # Report any failed routes
         if self._failed_routes:
-            logger.error(f"Cannot proceed with {len(self._failed_routes)} failed route files")
+            logger.error(f"Failed to load {len(self._failed_routes)} route files:")
+            for route_path, file_path, error_msg in self._failed_routes:
+                logger.error(f"  ✗ {route_path}: {error_msg}")
+            logger.error("Cannot proceed - fix the errors above and try again")
             return []
+        
+        if routes:
+            logger.info(f"✓ Discovered {len(routes)} routes successfully")
+        else:
+            logger.warning("No routes found in directory")
         
         return routes
     
@@ -110,17 +124,17 @@ class RouteScanner:
     
     def _validate_file_structure(self, file_path: Path) -> List[str]:
         """
-        Validate file structure without importing (static analysis).
+        Validate file structure using static analysis (no imports).
         
-        Checks for:
-        - Duplicate function names (two GET handlers in same file)
-        - Python syntax errors
+        Checks:
+        - Duplicate function names (e.g., two GET handlers)
+        - Python syntax errors with detailed context
         
         Args:
             file_path: Path to the route file
             
         Returns:
-            List of error messages (empty if file is valid)
+            List of error messages (empty if valid)
         """
         errors = []
         
@@ -143,8 +157,7 @@ class RouteScanner:
                             line_no = node.lineno
                             prev_line = function_names[func_name]
                             errors.append(
-                                f"Duplicate {func_name} method defined at line "
-                                f"{prev_line} and line {line_no}"
+                                f"Duplicate {func_name} handler at lines {prev_line} and {line_no}"
                             )
                         else:
                             function_names[func_name] = node.lineno
@@ -153,13 +166,15 @@ class RouteScanner:
             try:
                 compile(content, str(file_path), 'exec')
             except SyntaxError as e:
-                error_msg = f"Syntax error at line {e.lineno}, column {e.offset}: {e.msg}"
+                error_msg = f"Syntax error line {e.lineno}: {e.msg}"
                 if e.text:
-                    error_msg += f"\n{e.text.rstrip()}\n{' ' * (e.offset or 0)}^"
+                    error_msg += f"\n  {e.text.rstrip()}"
+                    if e.offset:
+                        error_msg += f"\n  {' ' * (e.offset - 1)}^"
                 errors.append(error_msg)
                     
         except Exception as e:
-            errors.append(f"Error reading file: {str(e)}")
+            errors.append(f"Failed to read file: {str(e)}")
         
         return errors
     

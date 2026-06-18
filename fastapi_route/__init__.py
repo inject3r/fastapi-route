@@ -3,7 +3,7 @@
 from .app import create_app, FastAPIRouterApp
 from .version import __version__
 from .routing.router import Router
-from .request import Request
+from .request import Request, PayloadTooLargeError
 from .response import Response, JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from .exceptions import (
     HTTPException,
@@ -20,6 +20,7 @@ __all__ = [
     "__version__",
     "Router",
     "Request",
+    "PayloadTooLargeError",
     "Response",
     "JSONResponse",
     "HTMLResponse",
